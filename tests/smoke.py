@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw, ImageFilter  # noqa: E402
 
 from server import config, pipeline as pipeline_engine  # noqa: E402
-from server.algorithms import detection, features, segmentation, style  # noqa: E402
+from server.algorithms import detection, features, mosaic, segmentation, style  # noqa: E402
 from server.batch import BatchManager, process_image  # noqa: E402
 from server.cache import ResultCache  # noqa: E402
 from server.history import HistoryManager  # noqa: E402
@@ -115,6 +115,20 @@ def main():
     for s in ("oil", "sketch", "cyber"):
         r = style.apply(work, {"style": s, "strength": 100})
         print(f"  {s}: {r['description']}")
+
+    print("\n== 照片马赛克 ==")
+    materials = []
+    for _ in range(24):
+        color = (random.randrange(256), random.randrange(256), random.randrange(256))
+        mw, mh = random.choice([(90, 40), (40, 90), (70, 70)])  # 横竖不一的素材
+        tile = Image.new("RGB", (mw, mh), color)
+        ImageDraw.Draw(tile).ellipse([8, 8, mw - 8, mh - 8],
+                                     fill=tuple(255 - c for c in color))
+        materials.append(tile)
+    r = mosaic.build_mosaic(work, materials, {"cols": 40, "cell_size": 20,
+                                               "fit": "cover", "tint": 15})
+    print(f"  网格 {r['cols']}x{r['rows']} · 成品 {r['width']}x{r['height']} · "
+          f"素材 {r['materials_used']}/{r['materials_total']} · 用到 {r['distinct_tiles']} 张")
 
     print("\n== 批处理 ==")
     batch = BatchManager(image_store, cache, history)

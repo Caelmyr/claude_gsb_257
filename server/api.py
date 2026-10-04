@@ -7,10 +7,10 @@ import io
 import json
 
 from flask import Blueprint, jsonify, request, send_file
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageOps
 
 from . import config, pipeline as pipeline_engine
-from .algorithms import detection, features, segmentation, style, util
+from .algorithms import detection, features, mosaic, segmentation, style, util
 from .batch import BatchManager, process_image
 from .cache import ResultCache, make_key
 from .history import HistoryManager
@@ -445,6 +445,86 @@ def run_style():
     if err:
         return err[0], err[1]
     return jsonify(res)
+
+
+# ---------------------------------------------------------------------------
+# 照片马赛克
+# ---------------------------------------------------------------------------
+@bp.post("/mosaic")
+def run_mosaic():
+    """以一张图为底样、图库多图为素材，生成照片马赛克大图。"""
+    data = request.get_json(silent=True) or {}
+    target_id = data.get("image_id")
+    material_ids = data.get("material_ids") or []
+
+    if not target_id:
+        return jsonify({"error": "请选择目标底样图"}), 400
+    if not isinstance(material_ids, list) or not material_ids:
+        return jsonify({"error": "请至少选择一张素材小图"}), 400
+    if len(material_ids) > mosaic.MAX_MATERIALS:
+        return jsonify({"error": f"素材数量超过上限 {mosaic.MAX_MATERIALS} 张"}), 400
+
+    target_rec = image_store.get(target_id)
+    if not target_rec:
+        return jsonify({"error": "目标图像不存在"}), 404
+    target_path = image_store.file_path(target_id)
+
+    # 素材去重；方向按 EXIF 转正，保证铺砖方向正确；坏图跳过
+    materials, valid_ids, skipped = [], [], []
+    for mid in dict.fromkeys(material_ids):
+        path = image_store.file_path(mid)
+        if not path:
+            skipped.append(mid)
+            continue
+        try:
+            img = ImageOps.exif_transpose(Image.open(path))
+            materials.append(img)
+            valid_ids.append(mid)
+        except Exception:  # noqa: BLE001
+            skipped.append(mid)
+    if not materials:
+        return jsonify({"error": "素材图像均无法读取"}), 400
+
+    params = {
+        "cols": data.get("cols", 48),
+        "cell_size": data.get("cell_size", 40),
+        "fit": data.get("fit", "cover"),
+        "material_count": data.get("material_count", 0),
+        "repeat": data.get("repeat", "avoid"),
+        "color_space": data.get("color_space", "lab"),
+        "tint": data.get("tint", 15),
+    }
+    fit = params["fit"]
+    if fit not in mosaic.FIT_MODES:
+        return jsonify({"error": f"填充方式非法：{fit}"}), 400
+    if params["repeat"] not in ("avoid", "allow"):
+        return jsonify({"error": "重复策略非法"}), 400
+    if params["color_space"] not in ("lab", "rgb"):
+        return jsonify({"error": "比色空间非法"}), 400
+
+    # 目标也按 EXIF 转正，与素材口径一致
+    target = ImageOps.exif_transpose(Image.open(target_path))
+    key = make_key(
+        target_rec["hash"], "mosaic",
+        json.dumps({"m": valid_ids, "p": params}, sort_keys=True),
+    )
+    cached = cache.get(key)
+    if cached:
+        entry = cache.get_entry(cached) or {}
+        return jsonify({"result_id": cached, "cache_hit": True,
+                        "file_url": f"/api/results/{cached}/file",
+                        **entry.get("meta", {})})
+
+    result = mosaic.build_mosaic(target, materials, params)
+    image_out = result.pop("image")
+    result.pop("usage", None)
+    result.pop("selected_indices", None)
+    meta = {**result, "skipped_materials": len(skipped)}
+    result_id = cache.put(key, image_out, meta)
+    return jsonify({
+        "result_id": result_id, "cache_hit": False,
+        "file_url": f"/api/results/{result_id}/file", **meta,
+    })
 
 
 # ---------------------------------------------------------------------------

@@ -93,6 +93,14 @@ a { color: var(--accent); }
 .card-dim { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
 .card-badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.55); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 5px; }
 
+/* 多选勾选角标（照片马赛克素材库） */
+.mc-tick {
+  position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 12px; line-height: 20px; text-align: center;
+  font-weight: 700; opacity: 0; transform: scale(.6); transition: opacity .12s, transform .12s;
+}
+.card.selected .mc-tick { opacity: 1; transform: scale(1); }
+
 /* ---------- 按钮 ---------- */
 .btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--radius-sm);
