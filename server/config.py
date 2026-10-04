@@ -41,6 +41,13 @@ CACHE_MAX_ENTRIES = 400
 PIPELINE_MAX_VERSIONS = 20        # 每条流水线保留的版本快照数
 HISTORY_MAX_ENTRIES = 500         # 历史记录上限（超出裁掉最旧）
 
+# 照片马赛克
+MOSAIC_COLS_MIN = 10             # 网格列数范围（行数按目标长宽比自动）
+MOSAIC_COLS_MAX = 120
+MOSAIC_MAX_MATERIALS = 400        # 参与拼图的素材数上限
+MOSAIC_MIN_MATERIALS = 1          # 至少需要的素材数
+MOSAIC_MAX_OUTPUT = 3000          # 成品最长边像素上限（格尺寸自动收紧）
+
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".webp"}
 
 # ---------------------------------------------------------------------------

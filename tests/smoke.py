@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw, ImageFilter  # noqa: E402
 
 from server import config, pipeline as pipeline_engine  # noqa: E402
-from server.algorithms import detection, features, segmentation, style  # noqa: E402
+from server.algorithms import detection, features, mosaic, segmentation, style  # noqa: E402
 from server.batch import BatchManager, process_image  # noqa: E402
 from server.cache import ResultCache  # noqa: E402
 from server.history import HistoryManager  # noqa: E402
@@ -115,6 +115,34 @@ def main():
     for s in ("oil", "sketch", "cyber"):
         r = style.apply(work, {"style": s, "strength": 100})
         print(f"  {s}: {r['description']}")
+
+    print("\n== 照片马赛克 ==")
+    # 素材方向/尺寸刻意参差不齐：极窄竖图、极宽横图、小图，验证三种填满方式
+    mosaic_mats = []
+    for i in range(24):
+        mw = random.choice([16, 40, 80, 200, 400, 24])
+        mh = random.choice([16, 40, 80, 200, 400, 360])
+        m = Image.new("RGB", (mw, mh), (random.randrange(256), random.randrange(256), random.randrange(256)))
+        md = ImageDraw.Draw(m)
+        md.ellipse([0, 0, min(mw, mh), min(mw, mh)],
+                   fill=(random.randrange(256), random.randrange(256), random.randrange(256)))
+        mosaic_mats.append(m)
+    for fit, fill in (("cover", "white"), ("contain", "blur"), ("stretch", "white")):
+        r = mosaic.build(work, mosaic_mats, {
+            "cols": 40, "tile_size": 32, "fit": fit, "contain_fill": fill,
+            "max_materials": 20, "repeat_gap": 1, "blend": 25,
+        })
+        img = r["image"]
+        assert img.size == (r["cols"] * r["tile_size"], r["rows"] * r["tile_size"])
+        assert img.size[0] * img.size[1] > 0
+        print(f"  {fit}/{fill}: {r['cols']}x{r['rows']}={r['cells']}格 "
+              f"{r['width']}x{r['height']}px 素材{r['materials_used']}/{r['materials_pool']} "
+              f"ΔE={r['mean_color_error']}")
+    # 单张素材 + 间距约束：每格仍必须被填上，不允许空格
+    r = mosaic.build(work, mosaic_mats[:1],
+                     {"cols": 20, "tile_size": 24, "fit": "cover", "repeat_gap": 2})
+    assert r["materials_used"] == 1 and r["cells"] == 20 * r["rows"]
+    print(f"  单素材兜底: {r['cells']} 格全部填充，无空格")
 
     print("\n== 批处理 ==")
     batch = BatchManager(image_store, cache, history)

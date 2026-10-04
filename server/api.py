@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request, send_file
 from PIL import Image, ImageChops
 
 from . import config, pipeline as pipeline_engine
-from .algorithms import detection, features, segmentation, style, util
+from .algorithms import detection, features, mosaic, segmentation, style, util
 from .batch import BatchManager, process_image
 from .cache import ResultCache, make_key
 from .history import HistoryManager
@@ -123,6 +123,14 @@ def get_config():
         "preview_dim": config.PREVIEW_DIM,
         "categories": CATEGORIES,
         "batch_workers": config.MAX_BATCH_WORKERS,
+        "mosaic": {
+            "cols_min": config.MOSAIC_COLS_MIN,
+            "cols_max": config.MOSAIC_COLS_MAX,
+            "max_materials": config.MOSAIC_MAX_MATERIALS,
+            "max_output": config.MOSAIC_MAX_OUTPUT,
+            "fit_modes": list(mosaic.FIT_MODES),
+            "contain_fills": list(mosaic.CONTAIN_FILLS),
+        },
     })
 
 
@@ -445,6 +453,82 @@ def run_style():
     if err:
         return err[0], err[1]
     return jsonify(res)
+
+
+# ---------------------------------------------------------------------------
+# 照片马赛克（目标图 + 多张素材图）
+# ---------------------------------------------------------------------------
+@bp.post("/mosaic")
+def run_mosaic():
+    data = request.get_json(silent=True) or {}
+    target_id = data.get("image_id")
+    material_ids = data.get("material_ids") or []
+
+    target_rec = image_store.get(target_id)
+    if not target_rec:
+        return jsonify({"error": "请选择目标图（底样）"}), 400
+    if not isinstance(material_ids, list) or len(material_ids) < config.MOSAIC_MIN_MATERIALS:
+        return jsonify({"error": "请至少选择 1 张素材小图"}), 400
+    if len(material_ids) > config.MOSAIC_MAX_MATERIALS:
+        return jsonify({"error": f"素材数量不能超过 {config.MOSAIC_MAX_MATERIALS} 张"}), 400
+
+    # 去重（同一张素材重复传没有意义）；同时过滤已删除的图
+    material_ids = list(dict.fromkeys(material_ids))
+    paths = []
+    for mid in material_ids:
+        p = image_store.file_path(mid)
+        if p:
+            paths.append(p)
+    missing = len(material_ids) - len(paths)
+    if not paths:
+        return jsonify({"error": "所选素材图均已不存在，请重新选择"}), 400
+
+    params = {
+        "cols": data.get("cols", 40),
+        "tile_size": data.get("tile_size", 48),
+        "fit": data.get("fit", "cover"),
+        "contain_fill": data.get("contain_fill", "white"),
+        "max_materials": data.get("max_materials", 200),
+        "repeat_gap": data.get("repeat_gap", 1),
+        "blend": data.get("blend", 20),
+    }
+    key = make_key(target_rec["hash"], ",".join(material_ids), "mosaic",
+                   json.dumps(params, sort_keys=True))
+    cached = cache.get(key)
+    if cached:
+        entry = cache.get_entry(cached) or {}
+        return jsonify({"result_id": cached, "cache_hit": True,
+                        "file_url": f"/api/results/{cached}/file",
+                        "missing_materials": missing, **entry.get("meta", {})})
+
+    target = Image.open(image_store.file_path(target_id))
+    materials = []
+    try:
+        try:
+            target.load()
+            for p in paths:
+                m = Image.open(p)
+                m.load()  # 提前解码，损坏文件在这里暴露而不是在拼图中途
+                materials.append(m)
+        except Exception:
+            return jsonify({"error": "部分图像文件无法读取，请重新上传或更换素材"}), 400
+        try:
+            result = mosaic.build(target, materials, params)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    finally:
+        for im in materials:
+            im.close()
+        target.close()
+
+    image_out = result.get("image")
+    meta = {k: v for k, v in result.items() if k != "image"}
+    result_id = cache.put(key, image_out, meta)
+    return jsonify({
+        "result_id": result_id, "cache_hit": False,
+        "file_url": f"/api/results/{result_id}/file",
+        "missing_materials": missing, **meta,
+    })
 
 
 # ---------------------------------------------------------------------------

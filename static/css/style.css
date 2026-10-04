@@ -92,6 +92,12 @@ a { color: var(--accent); }
 .card-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-dim { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
 .card-badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.55); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 5px; }
+.m-pick {
+  position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 12px; display: grid; place-items: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+.mgrid .card .thumb { aspect-ratio: 1/1; }
 
 /* ---------- 按钮 ---------- */
 .btn {
